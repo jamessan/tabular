@@ -107,21 +107,29 @@ function! s:StripLeadingSpaces(string)
 endfunction
 
 " Find the longest common indent for a list of strings                    {{{2
-function! s:LongestCommonIndent(strings)
+function! s:LongestCommonIndent(strings, delim)
   if empty(a:strings)
     return ''
   endif
 
+  " It's only useful to determine a common indent for lines that will actually
+  " be aligned
+  let strings = filter(copy(a:strings), 'v:val !~ "^\s*$" && (!s:do_gtabularize || v:val !~ a:delim)')
+  if empty(strings)
+    return ''
+  endif
+
+  let numlines = len(strings)
   let n = 0
   while 1
-    let ns = join(map(copy(a:strings), 'v:val[n]'), '')
-    if ns != repeat(' ', len(a:strings)) && ns != repeat("\t", len(a:strings))
+    let ns = join(map(copy(strings), 'v:val[n]'), '')
+    if ns != repeat(' ', numlines) && ns != repeat("\t", numlines)
       break
     endif
     let n += 1
   endwhile
 
-  return strpart(a:strings[0], 0, n)
+  return strpart(strings[0], 0, n)
 endfunction
 
 " Split a string into fields and delimiters                               {{{2
@@ -240,9 +248,9 @@ function! tabular#TabularizeStrings(strings, delim, ...)
 
   let lines = a:strings
 
-  " Find and strip the common indent from all lines
-  let common_indent = s:LongestCommonIndent(lines)
-  call map(lines, 'strpart(v:val, len(common_indent))')
+  " Find the common indent for all lines
+  let common_indent = s:LongestCommonIndent(lines, a:delim)
+  let comment_len = len(common_indent)
 
   call map(lines, 's:SplitDelim(v:val, a:delim)')
 
@@ -254,6 +262,8 @@ function! tabular#TabularizeStrings(strings, delim, ...)
     endif
 
     if len(line) >= 1
+      " Remove common indent from the start of the line
+      let line[0] = strpart(line[0], comment_len)
       for i in range(0, len(line)-1, 2)
         let line[i] = s:StripLeadingSpaces(s:StripTrailingSpaces(line[i]))
       endfor
@@ -302,11 +312,13 @@ function! tabular#TabularizeStrings(strings, delim, ...)
       let line[i] = field . (lead_blank && i == 0 ? '' : repeat(" ", pad))
     endfor
 
-    let lines[idx] = s:StripTrailingSpaces(join(line, ''))
+    " Restore the common indent if the line previously had relevant content in it
+    let prefix = ''
+    if len(line) > 1 || line[0] !~ '^\s*$'
+      let prefix = common_indent
+    endif
+    let lines[idx] = prefix . s:StripTrailingSpaces(join(line, ''))
   endfor
-
-  " Add the common indent back to all the lines
-  call map(lines, 'common_indent . v:val')
 endfunction
 
 " Apply 0 or more filters, in sequence, to selected text in the buffer    {{{2
